@@ -1,0 +1,165 @@
+---
+title: "HuYuDataInsight LLC"
+author: "Zhaowei Cai"
+date: "2024-05-02"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+# Loading packages
+```{r}
+library(tseries)
+library(forecast)
+library(stringr)
+library(PerformanceAnalytics)
+library(xts)
+```
+
+# Question 1
+```{r}
+set.seed(123)
+#create a time series with right observations and first element is 0
+ts_sim <- arima.sim(list(order = c(1,0,1), ar=0.5, ma=0.4), n = 410) + 3
+
+left <- 401
+right <- 410
+it <- left:right
+```
+
+
+```{r}
+plot(ts_sim, col=4, las=1)
+abline(v=c(1, left, right), lty="dotted", col=4)
+```
+
+# Question 2
+
+
+```{r}
+myts = subset(ts_sim, subset=rep(c(TRUE, FALSE), times=c(400, 10)))
+```
+
+## Step 1: visualize myts
+```{r}
+plot.zoo(myts, col=4, las=1, main="Time Series")
+```
+## Step 2: unit root test (augmented Dickey-Fuller) of myts
+```{r}
+adf.test(myts, alternative = 'stationary')
+kpss.test(myts)
+```
+We have used both the KPSS test and the ADF Unit root test to check the stationary. The null hypothesis of the Unit root test (Adf.test) is rejected while the null hypothesis of KPSS test is accepted.
+Both indicate the data are stationary.
+
+## Step 3: Identifying lags
+```{r}
+acf(myts)
+pacf(myts)
+```
+The Partial ACF cut off after first lag, it shows the MA(1) part of ARIMA model (q=1).
+
+## Step 4: train the model with auto.arima
+```{r}
+fit_myts = auto.arima(
+  myts,
+  max.p = 3,
+  max.q = 3,
+  ic = "aicc",
+  seasonal = FALSE,
+  stationary = TRUE,
+  lambda = NULL,
+  stepwise = FALSE,
+  approximation = FALSE,
+  trace = T
+)
+best.fit = arima(myts, c(1,0,1))
+summary(best.fit)
+```
+There is an intercept equal to 3.0225.
+
+```{r}
+checkresiduals(best.fit)
+Box.test(best.fit$residuals)
+```
+The p-value is higher than 0.05, so there is little evidence of non-zero autocorrelations in the forecast errors.
+
+```{r}
+shapiro.test(best.fit$residuals)
+```
+Shapiro-Wilk test confirms the normally distributed residuals as well.
+
+
+# Question 3
+
+```{r}
+forecast_myts = forecast(fit_myts, h=10, level=0.95)
+plot(forecast_myts, col=4, las=1)
+abline(v=c(1, 400, 410), lty="dotted", col=4)
+lines(401:410, ts_sim[401:410], lty="dotted", col="red")
+# red is observation and blue is prediction
+```
+
+```{r}
+# since it is one step ahead predictin, so we need use for loop
+pred_df <- data.frame(NULL)
+for(t in 401:410){
+  pred_onestep <- forecast(ts_sim[1:t], h=1, level=0.95, model = fit_myts)
+  pred_df <- rbind(pred_df, data.frame(mean = pred_onestep$mean[1], lower = pred_onestep$lower[1], upper = pred_onestep$upper[1]))
+}
+```
+
+```{r}
+plot(ts_sim, col=4, las=1)
+abline(v=c(1, left, right), lty="dotted", col=4)
+
+lines(it, pred_df$mean, col = 'red')
+lines(it, pred_df$lower, col = 'green')
+lines(it, pred_df$upper, col = 'green')
+legend(40, 40, legend=c("Observations", "Prediction", "Bounds of CI"),col=c("blue", "red", "green"),lty = 1, cex=0.8)
+```
+
+
+# Question 4
+
+```{r}
+#(a)
+data = read.csv('TSLA1.csv')
+
+library(forecast)
+library(zoo)
+library(tseries)
+TSLA = data$Close
+time = as.Date(data$Date, format = '%m/%d/%y')
+df = data.frame(datefield = time, TSLA = TSLA)
+TSLA_stock = with(df, zoo(TSLA, order.by = time))
+plot.zoo(TSLA_stock, col=4, las=1, main="TSLA")
+
+# Use the closing price to get log return
+log_return = na.omit(diff(log(data$Close))) # log return
+time = as.Date(data$Date, format = '%m/%d/%y')[-1]
+df = data.frame(datefield = time, TSLA = log_return)
+TSLA_return = with(df, zoo(TSLA, order.by = time))
+plot(df, main = "TSLA log returns")
+plot.zoo(TSLA_return, col=4, las=1, main="TSLA")
+
+adf.test(log_return)
+kpss.test(log_return)
+# Stationary
+acf(log_return)
+pacf(log_return)
+
+model <- auto.arima(log_return, trace = T)
+model
+
+checkresiduals(model)
+Box.test(model$residuals)
+shapiro.test(model$residuals)
+
+# (b)
+# Log return is the first order diff of logged closing price.
+log_cp = log(data$Close)
+model <- auto.arima(log_cp, trace = T)
+# ARIMA(0,1,0)
+```
